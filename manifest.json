@@ -3,7 +3,8 @@
   "short_name": "Mačko bomba",
   "start_url": "index.html",
   "display": "fullscreen",
-  "orientation": "portrait",
-  "background_color": "#1d2b1f",
-  "theme_color": "#1d2b1f"
+  "orientation": "landscape",
+  "background_color": "#4f8a43",
+  "theme_color": "#7cbf6a",
+  "icons": [{ "src": "img/ema.png", "sizes": "332x500", "type": "image/png" }]
 }

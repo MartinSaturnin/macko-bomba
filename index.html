@@ -4,75 +4,426 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="theme-color" content="#1d2b1f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#7cbf6a">
 <link rel="manifest" href="manifest.json">
+<link rel="icon" href="img/ema.png">
 <title>Mačko bomba</title>
 <style>
-  html,body{margin:0;height:100%;background:#1d2b1f;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none}
+  html,body{margin:0;height:100%;background:#4f8a43;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none}
   canvas{display:block;width:100vw;height:100vh;height:100dvh}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 <script>
-// ===== Základ enginu: plátno na výšku, dotyk, načítání obrázků, herní smyčka =====
-const W = 720, H = 1280;                 // logické rozlišení (na výšku)
+"use strict";
+// ================= ZÁKLAD: plátno na šířku, dotyk, obrázky =================
+const W = 1280, H = 720;
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
-let scale = 1, offX = 0, offY = 0;
+let scale = 1, offX = 0, offY = 0, portrait = false;
 function resize(){
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
   cv.width = innerWidth * dpr; cv.height = innerHeight * dpr;
   scale = Math.min(cv.width / W, cv.height / H);
   offX = (cv.width - W * scale) / 2; offY = (cv.height - H * scale) / 2;
+  portrait = innerHeight > innerWidth * 1.1;
 }
 addEventListener('resize', resize); resize();
 
-// Obrázky z img/ – sem se budou postupně přidávat
 const IMAGES = {
-  // nazev: 'img/soubor.png',
+  logo:'logo', ema:'ema', macko:'macko', emanuel:'emanuel', kure:'kure', jahoda:'jahoda',
+  cesta:'cesta', ohradka:'ohradka', hodiny:'hodiny',
+  v1:'vejce1', v1r:'vejce1-ruzove', v1m:'vejce1-modre', v1z:'vejce1-zelene',
+  v2:'vejce2', v2r:'vejce2-ruzove', v2m:'vejce2-modre', v2z:'vejce2-zelene',
 };
+const EGGS = ['v1','v1r','v1m','v1z','v2','v2r','v2m','v2z'];
 const img = {};
-function loadAll(){
-  return Promise.all(Object.entries(IMAGES).map(([k, src]) => new Promise(res => {
-    const i = new Image(); i.onload = () => { img[k] = i; res(); }; i.onerror = res; i.src = src;
-  })));
+const loading = Promise.all(Object.entries(IMAGES).map(([k, f]) => new Promise(res => {
+  const i = new Image(); i.onload = () => { img[k] = i; res(); }; i.onerror = res; i.src = 'img/' + f + '.png';
+})));
+
+// vykreslení obrázku: střed dole (nohy) v x,y, výška h
+function sprite(k, x, y, h, o = {}){
+  const i = img[k]; if (!i) return;
+  const w = h * i.width / i.height;
+  ctx.save();
+  ctx.translate(x, y);
+  if (o.rot) ctx.rotate(o.rot);
+  ctx.scale((o.flip ? -1 : 1) * (o.sx || 1), o.sy || 1);
+  if (o.alpha != null) ctx.globalAlpha = o.alpha;
+  ctx.drawImage(i, -w / 2, -h, w, h);
+  ctx.restore();
 }
 
-// Dotyk / myš → logické souřadnice
-const input = { taps: [] };
-cv.addEventListener('pointerdown', e => {
-  const r = cv.getBoundingClientRect(), dpr = cv.width / r.width;
-  input.taps.push({ x: ((e.clientX - r.left) * dpr - offX) / scale, y: ((e.clientY - r.top) * dpr - offY) / scale });
-});
+// ---- zvuky (krátké pípnutí přes WebAudio, bez souborů) ----
+let actx = null;
+function beep(f = 600, d = 0.1, type = 'triangle', vol = 0.15, slide = 0){
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    const o = actx.createOscillator(), g = actx.createGain(), t = actx.currentTime;
+    o.type = type; o.frequency.setValueAtTime(f, t);
+    if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(40, f + slide), t + d);
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + d);
+    o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + d);
+  } catch (e) {}
+}
+const sfx = {
+  egg:   () => { beep(660, .08); setTimeout(() => beep(990, .1), 70); },
+  berry: () => { [520, 660, 780, 1040].forEach((f, i) => setTimeout(() => beep(f, .1, 'square', .08), i * 60)); },
+  chick: () => { [900, 1200, 900, 1300].forEach((f, i) => setTimeout(() => beep(f, .06, 'sine', .15), i * 70)); },
+  steal: () => beep(300, .3, 'sawtooth', .08, -200),
+  hurt:  () => beep(200, .4, 'square', .1, -120),
+  start: () => { [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => beep(f, .15), i * 110)); },
+  end:   () => { [784, 659, 523, 392].forEach((f, i) => setTimeout(() => beep(f, .2), i * 150)); },
+};
 
-// ===== Herní stav (doplní se podle návrhu) =====
-const state = { t: 0 };
+// ---- dotyk ----
+const pointer = { down: false, x: 0, y: 0, tapped: false };
+function toGame(e){
+  const r = cv.getBoundingClientRect(), k = cv.width / r.width;
+  return { x: ((e.clientX - r.left) * k - offX) / scale, y: ((e.clientY - r.top) * k - offY) / scale };
+}
+cv.addEventListener('pointerdown', e => { const p = toGame(e); Object.assign(pointer, p, { down: true, tapped: true }); goFullscreen(); });
+cv.addEventListener('pointermove', e => { if (pointer.down) Object.assign(pointer, toGame(e)); });
+addEventListener('pointerup', () => pointer.down = false);
+addEventListener('pointercancel', () => pointer.down = false);
+function goFullscreen(){
+  const d = document.documentElement;
+  if (!document.fullscreenElement && d.requestFullscreen) {
+    d.requestFullscreen().then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape').catch(() => {})).catch(() => {});
+  }
+}
 
+// ================= HERNÍ POLE =================
+// cesta: kreslená cesta natažená přes celou šířku
+const ROAD = { x: -40, y: 170, w: W + 80, h: 470 };
+// kde se dá chodit (pozice nohou)
+const WALK = { x0: 230, x1: 1000, y0: 370, y1: 555 };
+// ohrádky kolem cesty – za nimi vyskakují zvířátka a vajíčka
+const FENCES = [];
+for (let i = 0; i < 5; i++) FENCES.push({ x: 210 + i * 215, y: 330, row: 'top', phase: i * 1.3, pop: 0 });
+for (let i = 0; i < 4; i++) FENCES.push({ x: 320 + i * 215, y: 712, row: 'bottom', phase: i * 1.7 + .5, pop: 0 });
+
+const rnd = (a, b) => a + Math.random() * (b - a);
+const pick = a => a[Math.floor(Math.random() * a.length)];
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+// ================= STAV HRY =================
+const GAME_TIME = 90;          // sekund na jedno kolo
+const LIVES = 3;
+let scene = 'intro', sceneT = 0;
+let G = null;
+let best = 0; try { best = +localStorage.getItem('mackoBest') || 0; } catch (e) {}
+
+function newGame(){
+  G = {
+    time: GAME_TIME, score: 0, lives: LIVES, eggs: 0, berries: 0, chicks: 0,
+    bonusT: 0,                        // zbývající čas bonusu ×3
+    ema: { x: 640, y: 470, tx: 640, ty: 470, dir: 1, walk: 0, hurtT: 0 },
+    macko: { x: -120, y: 450, dir: 1, walk: 0, target: null, carry: null, carryT: 0, wait: 2 },
+    emanuel: { x: 300, y: 120, t: 0 },
+    items: [], floats: [], spawnT: 1, chickT: rnd(12, 18), berryT: rnd(8, 14),
+  };
+  FENCES.forEach(f => f.pop = 0);
+}
+
+// předmět: vyskočí zpoza ohrádky a dopadne na cestu
+function spawn(kind){
+  const free = FENCES.filter(f => f.pop <= 0);
+  if (!free.length) return;
+  const f = pick(free); f.pop = 1;
+  const it = {
+    kind, img: kind === 'egg' ? pick(EGGS) : kind,
+    x: f.x, y: f.row === 'top' ? f.y - 20 : f.y - 40,
+    tx: clamp(f.x + rnd(-120, 120), WALK.x0, WALK.x1),
+    ty: rnd(WALK.y0 + 10, WALK.y1 - 10),
+    t: 0, state: 'jump', life: kind === 'egg' ? 9 : kind === 'jahoda' ? 6 : 7, fence: f,
+    vx: rnd(-60, 60), peck: 0,
+  };
+  it.sx = it.x; it.sy = it.y;
+  G.items.push(it);
+}
+
+function addScore(n, x, y, color = '#fff'){
+  const m = G.bonusT > 0 ? 3 : 1;
+  G.score += n * m;
+  G.floats.push({ x, y, text: '+' + n * m + (m > 1 ? ' ×3' : ''), t: 0, color });
+}
+
+// ================= UPDATE =================
 function update(dt){
-  state.t += dt;
-  input.taps.length = 0;
+  sceneT += dt;
+  if (scene === 'intro') {
+    if (pointer.tapped && sceneT > 0.6) { newGame(); scene = 'play'; sceneT = 0; sfx.start(); }
+  } else if (scene === 'play') {
+    updatePlay(dt);
+  } else if (scene === 'over') {
+    if (pointer.tapped && sceneT > 1.2) { newGame(); scene = 'play'; sceneT = 0; sfx.start(); }
+  }
+  pointer.tapped = false;
+}
+
+function updatePlay(dt){
+  const g = G;
+  g.time -= dt;
+  if (g.bonusT > 0) g.bonusT -= dt;
+
+  // --- Ema jde tam, kam ťukneš / táhneš prstem ---
+  const e = g.ema;
+  if (pointer.down) { e.tx = clamp(pointer.x, WALK.x0, WALK.x1); e.ty = clamp(pointer.y + 60, WALK.y0, WALK.y1); }
+  const dx = e.tx - e.x, dy = e.ty - e.y, d = Math.hypot(dx, dy), sp = 380;
+  if (d > 4) {
+    e.x += dx / d * Math.min(d, sp * dt); e.y += dy / d * Math.min(d, sp * dt);
+    if (Math.abs(dx) > 3) e.dir = dx > 0 ? 1 : -1;
+    e.walk += dt * 12;
+  } else e.walk = 0;
+  if (e.hurtT > 0) e.hurtT -= dt;
+
+  // --- objevování věcí za ohrádkami ---
+  g.spawnT -= dt;
+  const eggsOut = g.items.filter(i => i.kind === 'egg').length;
+  if (g.spawnT <= 0) { if (eggsOut < 6) spawn('egg'); g.spawnT = rnd(0.7, 1.5); }
+  g.berryT -= dt; if (g.berryT <= 0) { spawn('jahoda'); g.berryT = rnd(9, 15); }
+  g.chickT -= dt; if (g.chickT <= 0) { if (!g.items.some(i => i.kind === 'kure')) spawn('kure'); g.chickT = rnd(14, 22); }
+  FENCES.forEach(f => { if (f.pop > 0) f.pop -= dt * 2; });
+
+  // --- předměty ---
+  for (const it of g.items) {
+    it.t += dt;
+    if (it.state === 'jump') {
+      const k = Math.min(1, it.t / 0.7);
+      it.x = it.sx + (it.tx - it.sx) * k;
+      it.y = it.sy + (it.ty - it.sy) * k - Math.sin(k * Math.PI) * 140;
+      if (k >= 1) { it.state = 'ground'; it.t = 0; }
+    } else if (it.state === 'ground') {
+      if (it.kind === 'kure') {   // kuřátko pobíhá a zobe
+        it.peck += dt;
+        it.x = clamp(it.x + it.vx * dt, WALK.x0, WALK.x1);
+        if (it.x <= WALK.x0 || it.x >= WALK.x1 || Math.random() < dt * 0.5) it.vx = rnd(-80, 80);
+      }
+      if (it.t > it.life) { it.state = 'gone'; }
+      if (it.state === 'ground' && dist(it, e) < 75) {
+        it.state = 'taken';
+        if (it.kind === 'egg') { g.eggs++; addScore(10, it.x, it.y - 60, '#fff6b0'); sfx.egg(); }
+        if (it.kind === 'jahoda') { g.berries++; addScore(20, it.x, it.y - 60, '#ff8a8a'); sfx.berry(); }
+        if (it.kind === 'kure') { g.chicks++; g.bonusT = 10; g.floats.push({ x: it.x, y: it.y - 80, text: 'BONUS ×3!', t: 0, color: '#ffe14d', big: true }); sfx.chick(); }
+      }
+    }
+  }
+  g.items = g.items.filter(i => i.state !== 'gone' && i.state !== 'taken');
+
+  // --- Macko: chodí po cestě a krade vajíčka ---
+  const m = g.macko;
+  if (m.wait > 0) m.wait -= dt;
+  else {
+    if (!m.target || !g.items.includes(m.target)) {
+      const eggs = g.items.filter(i => i.kind === 'egg' && i.state === 'ground');
+      m.target = eggs.length ? eggs.reduce((a, b) => dist(a, m) < dist(b, m) ? a : b) : null;
+    }
+    const tx = m.target ? m.target.x : 640 + Math.sin(sceneT * .4) * 400;
+    const ty = m.target ? m.target.y : 460 + Math.sin(sceneT * .7) * 80;
+    const mdx = tx - m.x, mdy = ty - m.y, md = Math.hypot(mdx, mdy);
+    const msp = 95 + (GAME_TIME - g.time) * 0.9;     // čím déle hra trvá, tím je Macko rychlejší
+    if (md > 3) { m.x += mdx / md * Math.min(md, msp * dt); m.y += mdy / md * Math.min(md, msp * dt); m.walk += dt * 9; if (Math.abs(mdx) > 2) m.dir = mdx > 0 ? 1 : -1; }
+    if (m.target && md < 30) {
+      m.carry = m.target.img; m.carryT = 1.2; m.target.state = 'gone'; m.target = null; m.wait = 0.8;
+      g.floats.push({ x: m.x, y: m.y - 190, text: 'Ham!', t: 0, color: '#c98b5a' }); sfx.steal();
+    }
+  }
+  if (m.carryT > 0) { m.carryT -= dt; if (m.carryT <= 0) m.carry = null; }
+  // Macko narazí do Emy → Ema přijde o život
+  if (e.hurtT <= 0 && m.wait <= 0 && Math.abs(m.x - e.x) < 60 && Math.abs(m.y - e.y) < 40) {
+    g.lives--; e.hurtT = 2; sfx.hurt();
+    e.tx = clamp(e.x + (e.x < m.x ? -160 : 160), WALK.x0, WALK.x1); e.ty = e.y;
+    g.floats.push({ x: e.x, y: e.y - 200, text: 'Au!', t: 0, color: '#ff6b6b', big: true });
+  }
+
+  // --- Emanuel létá nad polem ---
+  const em = g.emanuel; em.t += dt;
+  em.x = 640 + Math.sin(em.t * 0.45) * 520; em.y = 175 + Math.sin(em.t * 1.3) * 40;
+
+  // --- plovoucí body ---
+  g.floats.forEach(f => f.t += dt);
+  g.floats = g.floats.filter(f => f.t < 1.2);
+
+  if (g.time <= 0 || g.lives <= 0) {
+    g.time = Math.max(0, g.time); scene = 'over'; sceneT = 0; sfx.end();
+    if (g.score > best) { best = g.score; g.newBest = true; try { localStorage.setItem('mackoBest', best); } catch (e) {} }
+  }
+}
+
+// ================= KRESLENÍ =================
+function drawBackground(t){
+  const gr = ctx.createLinearGradient(0, 0, 0, H);
+  gr.addColorStop(0, '#a9dcf5'); gr.addColorStop(0.18, '#cfeefc'); gr.addColorStop(0.19, '#8fd07a'); gr.addColorStop(1, '#5fae55');
+  ctx.fillStyle = gr; ctx.fillRect(-200, -200, W + 400, H + 400);
+  ctx.strokeStyle = 'rgba(40,90,40,.35)'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+  for (let i = 0; i < 60; i++) {
+    const x = (i * 97) % W, y = 150 + ((i * 53) % 570), s = Math.sin(t * 2 + i) * 3;
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + s - 4, y - 14); ctx.moveTo(x + 6, y); ctx.lineTo(x + 8 + s, y - 12); ctx.stroke();
+  }
+}
+function drawRoad(){ if (img.cesta) ctx.drawImage(img.cesta, ROAD.x, ROAD.y, ROAD.w, ROAD.h); }
+
+function drawFence(f, t){
+  // ohrádka se pohupuje; když za ní něco vyskočí, poskočí
+  const sway = Math.sin(t * 2.2 + f.phase) * 0.05;
+  const hop = f.pop > 0 ? Math.sin((1 - f.pop) * Math.PI) * 14 : 0;
+  sprite('ohradka', f.x, f.y - hop, 150, { rot: sway, sx: 1 + (f.pop > 0 ? .06 : 0) });
+}
+
+function drawItem(it, t){
+  const bob = it.state === 'ground' ? Math.sin(t * 6 + it.x) * 3 : 0;
+  const fade = it.state === 'ground' && it.t > it.life - 1.5 ? (Math.sin(it.t * 20) > 0 ? 1 : .35) : 1;
+  if (it.state === 'ground') { ctx.fillStyle = 'rgba(0,0,0,.18)'; ctx.beginPath(); ctx.ellipse(it.x, it.y, 28, 8, 0, 0, 7); ctx.fill(); }
+  if (it.kind === 'egg') sprite(it.img, it.x, it.y + bob, 70, { alpha: fade, rot: Math.sin(t * 4 + it.x) * .08 });
+  if (it.kind === 'jahoda') sprite('jahoda', it.x, it.y + bob, 64, { alpha: fade, rot: Math.sin(t * 5) * .15 });
+  if (it.kind === 'kure') {
+    const peck = Math.max(0, Math.sin(it.peck * 9)) ** 6;   // zobání
+    sprite('kure', it.x, it.y, 95, { alpha: fade, flip: it.vx < 0, rot: (it.vx < 0 ? -1 : 1) * peck * 0.5 });
+  }
+}
+
+function drawWalker(k, o, h, extra = {}){
+  const step = Math.sin(o.walk);
+  ctx.fillStyle = 'rgba(0,0,0,.2)'; ctx.beginPath(); ctx.ellipse(o.x, o.y, 45, 12, 0, 0, 7); ctx.fill();
+  sprite(k, o.x, o.y - Math.abs(step) * 10, h, { flip: o.dir < 0, rot: step * 0.07, ...extra });
+}
+
+function drawEmanuel(o, t){
+  const flap = 0.75 + Math.abs(Math.sin(t * 14)) * 0.25;   // mávání křídly
+  sprite('emanuel', o.x, o.y + 55, 110, { sx: flap, rot: Math.cos(o.t * 0.45) * 0.15 });
+}
+
+function heart(x, y, s, fill){
+  ctx.save(); ctx.translate(x, y); ctx.scale(s / 40, s / 40);
+  ctx.beginPath(); ctx.moveTo(0, 12);
+  ctx.bezierCurveTo(-26, -6, -14, -26, 0, -12); ctx.bezierCurveTo(14, -26, 26, -6, 0, 12);
+  ctx.fillStyle = fill ? '#e8343c' : 'rgba(255,255,255,.35)'; ctx.fill();
+  ctx.lineWidth = 4; ctx.strokeStyle = '#1a1416'; ctx.lineJoin = 'round'; ctx.stroke(); ctx.restore();
+}
+
+function text(s, x, y, size, color = '#fff', align = 'center', stroke = '#1a1416'){
+  ctx.font = `bold ${size}px "Comic Sans MS","Chalkboard SE","Comic Neue",system-ui,sans-serif`;
+  ctx.textAlign = align; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+  ctx.lineWidth = size / 6; ctx.strokeStyle = stroke; ctx.strokeText(s, x, y);
+  ctx.fillStyle = color; ctx.fillText(s, x, y);
+}
+function roundRect(x, y, w, h, r){ ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+
+function drawHUD(){
+  const g = G;
+  ctx.fillStyle = 'rgba(255,250,235,.85)'; ctx.strokeStyle = '#1a1416'; ctx.lineWidth = 4;
+  roundRect(12, 10, 620, 92, 22); ctx.fill(); ctx.stroke();
+  // hodiny s ručičkou podle zbývajícího času
+  const cx = 62, cy = 56;
+  sprite('hodiny', cx, cy + 40, 82);
+  const a = -Math.PI / 2 + (1 - g.time / GAME_TIME) * Math.PI * 2;
+  ctx.strokeStyle = '#e8343c'; ctx.lineWidth = 6; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(cx + 4, cy + 2); ctx.lineTo(cx + 4 + Math.cos(a) * 24, cy + 2 + Math.sin(a) * 24); ctx.stroke();
+  text(Math.ceil(g.time) + '', 135, 57, 36, g.time < 10 ? '#ff5b5b' : '#fff');
+  // vajíčka, jahody, kuřátka
+  sprite('v1', 205, 86, 54); text('' + g.eggs, 248, 57, 32, '#fff', 'left');
+  sprite('jahoda', 320, 82, 46); text('' + g.berries, 352, 57, 32, '#fff', 'left');
+  sprite('kure', 420, 88, 58); text('' + g.chicks, 455, 57, 32, '#fff', 'left');
+  // životy
+  for (let i = 0; i < LIVES; i++) heart(515 + i * 40, 58, 38, i < g.lives);
+  // body vpravo nahoře
+  ctx.fillStyle = 'rgba(255,250,235,.85)'; roundRect(W - 262, 10, 250, 92, 22); ctx.fill(); ctx.stroke();
+  text('BODY', W - 137, 34, 22, '#ffe14d');
+  text('' + g.score, W - 137, 72, 44);
+  if (g.bonusT > 0) text('×3 ' + Math.ceil(g.bonusT) + 's', W - 137, 128, 34 + Math.sin(sceneT * 10) * 3, '#ffe14d');
+}
+
+function drawPlay(t){
+  const g = G;
+  drawBackground(t);
+  drawRoad();
+  // horní ohrádky (za cestou) – co teprve vyskakuje, je schované za nimi
+  const hidden = i => i.state === 'jump' && i.t < .25 && i.fence.row === 'top';
+  g.items.filter(hidden).forEach(i => drawItem(i, t));
+  FENCES.filter(f => f.row === 'top').forEach(f => drawFence(f, t));
+  // postavy a předměty seřazené podle hloubky
+  const list = g.items.filter(i => !hidden(i)).map(i => ({ y: i.y, d: () => drawItem(i, t) }));
+  const e = g.ema, m = g.macko;
+  list.push({ y: e.y, d: () => { if (e.hurtT > 0 && Math.sin(t * 30) > 0) return; drawWalker('ema', e, 175); } });
+  list.push({ y: m.y, d: () => { drawWalker('macko', m, 175); if (m.carry) sprite(m.carry, m.x + m.dir * 45, m.y - 75, 50); } });
+  list.sort((a, b) => a.y - b.y).forEach(o => o.d());
+  // dolní ohrádky (před cestou)
+  FENCES.filter(f => f.row === 'bottom').forEach(f => drawFence(f, t));
+  drawEmanuel(g.emanuel, t);
+  if (pointer.down) { ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 4; ctx.beginPath(); ctx.ellipse(e.tx, e.ty, 26, 9, 0, 0, 7); ctx.stroke(); }
+  g.floats.forEach(f => { ctx.globalAlpha = 1 - f.t / 1.2; text(f.text, f.x, f.y - f.t * 70, f.big ? 46 : 34, f.color); ctx.globalAlpha = 1; });
+  if (g.bonusT > 0) { ctx.fillStyle = `rgba(255,225,77,${.08 + Math.sin(t * 8) * .04})`; ctx.fillRect(0, 0, W, H); }
+  drawHUD();
+  if (scene === 'play' && sceneT < 1.5) text(sceneT < .9 ? 'Připravit…' : 'Sbírej vajíčka!', W / 2, H / 2, 70, '#ffe14d');
+}
+
+function drawIntro(t){
+  drawBackground(t);
+  // logo: vyskočí s pružným efektem a pohupuje se
+  const k = Math.min(1, t / 0.9);
+  const bounce = 1 - Math.pow(1 - k, 3) * Math.cos(k * 9);
+  const lw = 760 * bounce, lh = lw * (img.logo ? img.logo.height / img.logo.width : .66);
+  if (img.logo) {
+    ctx.save(); ctx.translate(W / 2, 290); ctx.rotate(Math.sin(t * 1.6) * 0.035);
+    ctx.fillStyle = 'rgba(255,250,235,.9)'; ctx.strokeStyle = '#1a1416'; ctx.lineWidth = 6;
+    roundRect(-lw / 2 - 30, -lh / 2 - 25, lw + 60, lh + 50, 40); ctx.fill(); ctx.stroke();
+    ctx.drawImage(img.logo, -lw / 2, -lh / 2, lw, lh); ctx.restore();
+  }
+  // postavičky přicházejí z krajů
+  const walkIn = Math.min(1, Math.max(0, (t - 0.8) / 1.2));
+  drawWalker('ema', { x: -100 + walkIn * 260, y: 705, dir: 1, walk: walkIn < 1 ? t * 12 : 0 }, 210);
+  drawWalker('macko', { x: W + 100 - walkIn * 260, y: 705, dir: -1, walk: walkIn < 1 ? t * 10 : 0 }, 210);
+  sprite('kure', 340, 705, 95, { rot: Math.max(0, Math.sin(t * 9)) ** 6 * .5 });
+  sprite('jahoda', 950, 700, 70, { rot: Math.sin(t * 3) * .2 });
+  ['v1', 'v2r', 'v1m', 'v2z'].forEach((k2, i) => sprite(k2, 460 + i * 120, 700 + Math.sin(t * 4 + i) * 8, 70));
+  drawEmanuel({ x: W / 2 + Math.sin(t * .8) * 520, y: 20 + Math.sin(t * 2) * 25, t }, t);
+  if (t > 1.2) text('Ťukni a hraj!', W / 2, 590, 56 + Math.sin(t * 5) * 5, '#ffe14d');
+  if (best) text('Rekord: ' + best, W - 20, 30, 28, '#fff', 'right');
+}
+
+function drawOver(t){
+  const g = G;
+  drawPlay(t);
+  ctx.fillStyle = 'rgba(30,20,10,.55)'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#fffaeb'; ctx.strokeStyle = '#1a1416'; ctx.lineWidth = 6;
+  roundRect(W / 2 - 330, 130, 660, 460, 40); ctx.fill(); ctx.stroke();
+  text(g.lives <= 0 ? 'Macko tě dostal!' : 'Čas vypršel!', W / 2, 190, 52, '#ffe14d');
+  text('Body: ' + g.score, W / 2, 275, 72);
+  sprite('v1', W / 2 - 190, 380, 60); text('' + g.eggs, W / 2 - 145, 350, 38, '#fff', 'left');
+  sprite('jahoda', W / 2 - 20, 376, 52); text('' + g.berries, W / 2 + 15, 350, 38, '#fff', 'left');
+  sprite('kure', W / 2 + 130, 385, 64); text('' + g.chicks, W / 2 + 170, 350, 38, '#fff', 'left');
+  text(g.newBest ? 'NOVÝ REKORD!' : 'Rekord: ' + best, W / 2, 445, 40, g.newBest ? '#ff8a8a' : '#fff');
+  if (t > 1.2) text('Ťukni a hraj znovu', W / 2, 530, 44 + Math.sin(t * 5) * 4, '#ffe14d');
+  sprite('ema', W / 2 - 420, 650, 200, { rot: Math.sin(t * 3) * .08 });
+  sprite('macko', W / 2 + 420, 650, 200, { flip: true, rot: Math.sin(t * 3 + 1) * .08 });
 }
 
 function draw(){
-  ctx.setTransform(1,0,0,1,0,0);
-  ctx.fillStyle = '#1d2b1f'; ctx.fillRect(0,0,cv.width,cv.height);
-  ctx.setTransform(scale,0,0,scale,offX,offY);
-  ctx.fillStyle = '#2e4430'; ctx.fillRect(0,0,W,H);
-  ctx.fillStyle = '#f3ead2'; ctx.textAlign = 'center';
-  ctx.font = 'bold 56px system-ui, sans-serif';
-  ctx.fillText('Mačko bomba', W/2, H/2 - 40);
-  ctx.font = '32px system-ui, sans-serif';
-  ctx.globalAlpha = 0.6 + 0.4 * Math.sin(state.t * 3);
-  ctx.fillText('čekám na první obrázek…', W/2, H/2 + 30);
-  ctx.globalAlpha = 1;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = '#4f8a43'; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.setTransform(scale, 0, 0, scale, offX, offY);
+  ctx.save(); ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip();
+  if (scene === 'intro') drawIntro(sceneT);
+  else if (scene === 'play') drawPlay(sceneT);
+  else drawOver(sceneT);
+  ctx.restore();
+  if (portrait) {
+    ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(0, 0, W, H);
+    text('Otoč telefon na šířku ↻', W / 2, H / 2, 60, '#ffe14d');
+  }
 }
 
 let last = performance.now();
 function loop(now){
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
-  update(dt); draw(); requestAnimationFrame(loop);
+  if (!portrait) update(dt);
+  draw(); requestAnimationFrame(loop);
 }
-loadAll().then(() => requestAnimationFrame(loop));
+loading.then(() => requestAnimationFrame(loop));
 </script>
 </body>
 </html>
