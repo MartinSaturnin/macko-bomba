@@ -1,4 +1,4 @@
-# Mačko bomba – průběžný návrh
+# Mačko bomba – návrh (první prototyp)
 
 Hra vzniká postupně podle diktátu a kreslených obrázků. Originální fotky kreseb
 jsou v `kresby/`, vyřezané herní obrázky (průhledné pozadí) v `img/`.
@@ -15,8 +15,8 @@ ovládá se dotykem, dá se „Přidat na plochu“ a hraje se jako aplikace.
 | 3 | `kresby/03-macko.jpg` | `img/macko.png` | Medvěd **Macko** | Chodí po cestě a krade vajíčka; když narazí do Emy, ubere jí život |
 | 4 | `kresby/04-ema.jpg` | `img/ema.png` | Hráčka **Ema** | Hlavní postava – chodí po cestě a sbírá vajíčka |
 | 5 | `kresby/05-kure.jpg` | `img/kure.png` | Kuřátko | Pobíhá a zobe; kdo ho chytí, má 10 s bonus **×3 body** |
-| 6 | `kresby/06-vejce1.jpg` | `img/vejce1*.png` | Vajíčko s prasklinou | Sbírá se, 10 bodů; žluté, růžové, modré, zelené |
-| 7 | `kresby/07-vejce2.jpg` | `img/vejce2*.png` | Puntíkaté vajíčko | Druhý typ vajíčka, 10 bodů; žluté, růžové, modré, zelené |
+| 6 | `kresby/06-vejce1.jpg` | `img/vejce1*.png` | Vajíčko s prasklinou | Hlavní vajíčko ke sbírání, 10 bodů; 6 barev (žlutá, růžová, modrá, zelená, oranžová, fialová) |
+| 7 | `kresby/07-vejce2.jpg` | `img/vejce2*.png` | Puntíkaté vajíčko | Druhý typ vajíčka, 10 bodů; stejných 6 barev |
 | 8 | `kresby/08-jahoda.jpg` | `img/jahoda.png` | **Jahůdka** | Bonus +20 bodů |
 | 9 | `kresby/09-herni-pole.jpg` | `img/cesta.png`, `img/hodiny.png` | Herní pole – cesta, hodiny, ikonky | Cesta natažená přes obrazovku, po ní se chodí; hodiny vlevo nahoře odpočítávají čas |
 | 10 | `kresby/10-ohradka.jpg` | `img/ohradka.png` | Ohrádka | Stojí kolem cesty, pohupuje se; zpoza ní vyskakují vajíčka, kuřátko a jahůdky |

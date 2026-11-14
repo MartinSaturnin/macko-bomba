@@ -36,8 +36,9 @@ const IMAGES = {
   cesta:'cesta', ohradka:'ohradka', hodiny:'hodiny',
   v1:'vejce1', v1r:'vejce1-ruzove', v1m:'vejce1-modre', v1z:'vejce1-zelene',
   v2:'vejce2', v2r:'vejce2-ruzove', v2m:'vejce2-modre', v2z:'vejce2-zelene',
+  v1o:'vejce1-oranzove', v1f:'vejce1-fialove', v2o:'vejce2-oranzove', v2f:'vejce2-fialove',
 };
-const EGGS = ['v1','v1r','v1m','v1z','v2','v2r','v2m','v2z'];
+const EGGS = ['v1','v1r','v1m','v1z','v1o','v1f','v2','v2r','v2m','v2z','v2o','v2f'];
 const img = {};
 const loading = Promise.all(Object.entries(IMAGES).map(([k, f]) => new Promise(res => {
   const i = new Image(); i.onload = () => { img[k] = i; res(); }; i.onerror = res; i.src = 'img/' + f + '.png';
@@ -172,7 +173,7 @@ function updatePlay(dt){
 
   // --- Ema jde tam, kam ťukneš / táhneš prstem ---
   const e = g.ema;
-  if (pointer.down) { e.tx = clamp(pointer.x, WALK.x0, WALK.x1); e.ty = clamp(pointer.y + 60, WALK.y0, WALK.y1); }
+  if (pointer.down || pointer.tapped) { e.tx = clamp(pointer.x, WALK.x0, WALK.x1); e.ty = clamp(pointer.y + 60, WALK.y0, WALK.y1); }
   const dx = e.tx - e.x, dy = e.ty - e.y, d = Math.hypot(dx, dy), sp = 380;
   if (d > 4) {
     e.x += dx / d * Math.min(d, sp * dt); e.y += dy / d * Math.min(d, sp * dt);
@@ -258,10 +259,10 @@ function updatePlay(dt){
 function drawBackground(t){
   const gr = ctx.createLinearGradient(0, 0, 0, H);
   gr.addColorStop(0, '#a9dcf5'); gr.addColorStop(0.18, '#cfeefc'); gr.addColorStop(0.19, '#8fd07a'); gr.addColorStop(1, '#5fae55');
-  ctx.fillStyle = gr; ctx.fillRect(-200, -200, W + 400, H + 400);
+  ctx.fillStyle = gr; ctx.fillRect(-1500, -400, W + 3000, H + 800);
   ctx.strokeStyle = 'rgba(40,90,40,.35)'; ctx.lineWidth = 3; ctx.lineCap = 'round';
-  for (let i = 0; i < 60; i++) {
-    const x = (i * 97) % W, y = 150 + ((i * 53) % 570), s = Math.sin(t * 2 + i) * 3;
+  for (let i = 0; i < 100; i++) {
+    const x = (i * 97) % (W + 800) - 400, y = 150 + ((i * 53) % 570), s = Math.sin(t * 2 + i) * 3;
     ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + s - 4, y - 14); ctx.moveTo(x + 6, y); ctx.lineTo(x + 8 + s, y - 12); ctx.stroke();
   }
 }
@@ -406,21 +407,25 @@ function draw(){
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = '#4f8a43'; ctx.fillRect(0, 0, cv.width, cv.height);
   ctx.setTransform(scale, 0, 0, scale, offX, offY);
-  ctx.save(); ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip();
+  ctx.save();
   if (scene === 'intro') drawIntro(sceneT);
   else if (scene === 'play') drawPlay(sceneT);
   else drawOver(sceneT);
   ctx.restore();
   if (portrait) {
-    ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(0, 0, W, H);
-    text('Otoč telefon na šířku ↻', W / 2, H / 2, 60, '#ffe14d');
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = 'rgba(25,45,25,.95)'; ctx.fillRect(0, 0, cv.width, cv.height);
+    const k = cv.width / 900;
+    ctx.setTransform(k, 0, 0, k, cv.width / 2, cv.height / 2);
+    sprite('ema', 0, -70, 260, { rot: Math.sin(sceneT * 3) * .1 });
+    text('Otoč telefon', 0, 50, 80, '#ffe14d'); text('na šířku ↻', 0, 140, 80, '#ffe14d');
   }
 }
 
 let last = performance.now();
 function loop(now){
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
-  if (!portrait) update(dt);
+  if (!portrait) update(dt); else sceneT += dt;
   draw(); requestAnimationFrame(loop);
 }
 loading.then(() => requestAnimationFrame(loop));
