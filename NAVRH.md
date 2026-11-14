@@ -1,4 +1,4 @@
-# Mobilní hra – průběžný návrh
+# Mačko bomba – průběžný návrh
 
 Hra vzniká postupně podle diktátu a kreslených obrázků. Každý obrázek se uloží
 do `img/` a zapíše se sem, co ve hře dělá.

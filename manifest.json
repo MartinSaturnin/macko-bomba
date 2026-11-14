@@ -1,6 +1,6 @@
 {
-  "name": "Hra",
-  "short_name": "Hra",
+  "name": "Mačko bomba",
+  "short_name": "Mačko bomba",
   "start_url": "index.html",
   "display": "fullscreen",
   "orientation": "portrait",

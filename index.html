@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#1d2b1f">
 <link rel="manifest" href="manifest.json">
-<title>Hra</title>
+<title>Mačko bomba</title>
 <style>
   html,body{margin:0;height:100%;background:#1d2b1f;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none}
   canvas{display:block;width:100vw;height:100vh;height:100dvh}
@@ -60,7 +60,7 @@ function draw(){
   ctx.fillStyle = '#2e4430'; ctx.fillRect(0,0,W,H);
   ctx.fillStyle = '#f3ead2'; ctx.textAlign = 'center';
   ctx.font = 'bold 56px system-ui, sans-serif';
-  ctx.fillText('Nová hra', W/2, H/2 - 40);
+  ctx.fillText('Mačko bomba', W/2, H/2 - 40);
   ctx.font = '32px system-ui, sans-serif';
   ctx.globalAlpha = 0.6 + 0.4 * Math.sin(state.t * 3);
   ctx.fillText('čekám na první obrázek…', W/2, H/2 + 30);
