@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#1d2b1f">
+<link rel="manifest" href="manifest.json">
+<title>Hra</title>
+<style>
+  html,body{margin:0;height:100%;background:#1d2b1f;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none}
+  canvas{display:block;width:100vw;height:100vh;height:100dvh}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// ===== Základ enginu: plátno na výšku, dotyk, načítání obrázků, herní smyčka =====
+const W = 720, H = 1280;                 // logické rozlišení (na výšku)
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let scale = 1, offX = 0, offY = 0;
+function resize(){
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = innerWidth * dpr; cv.height = innerHeight * dpr;
+  scale = Math.min(cv.width / W, cv.height / H);
+  offX = (cv.width - W * scale) / 2; offY = (cv.height - H * scale) / 2;
+}
+addEventListener('resize', resize); resize();
+
+// Obrázky z img/ – sem se budou postupně přidávat
+const IMAGES = {
+  // nazev: 'img/soubor.png',
+};
+const img = {};
+function loadAll(){
+  return Promise.all(Object.entries(IMAGES).map(([k, src]) => new Promise(res => {
+    const i = new Image(); i.onload = () => { img[k] = i; res(); }; i.onerror = res; i.src = src;
+  })));
+}
+
+// Dotyk / myš → logické souřadnice
+const input = { taps: [] };
+cv.addEventListener('pointerdown', e => {
+  const r = cv.getBoundingClientRect(), dpr = cv.width / r.width;
+  input.taps.push({ x: ((e.clientX - r.left) * dpr - offX) / scale, y: ((e.clientY - r.top) * dpr - offY) / scale });
+});
+
+// ===== Herní stav (doplní se podle návrhu) =====
+const state = { t: 0 };
+
+function update(dt){
+  state.t += dt;
+  input.taps.length = 0;
+}
+
+function draw(){
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.fillStyle = '#1d2b1f'; ctx.fillRect(0,0,cv.width,cv.height);
+  ctx.setTransform(scale,0,0,scale,offX,offY);
+  ctx.fillStyle = '#2e4430'; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle = '#f3ead2'; ctx.textAlign = 'center';
+  ctx.font = 'bold 56px system-ui, sans-serif';
+  ctx.fillText('Nová hra', W/2, H/2 - 40);
+  ctx.font = '32px system-ui, sans-serif';
+  ctx.globalAlpha = 0.6 + 0.4 * Math.sin(state.t * 3);
+  ctx.fillText('čekám na první obrázek…', W/2, H/2 + 30);
+  ctx.globalAlpha = 1;
+}
+
+let last = performance.now();
+function loop(now){
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  update(dt); draw(); requestAnimationFrame(loop);
+}
+loadAll().then(() => requestAnimationFrame(loop));
+</script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+{
+  "name": "Hra",
+  "short_name": "Hra",
+  "start_url": "index.html",
+  "display": "fullscreen",
+  "orientation": "portrait",
+  "background_color": "#1d2b1f",
+  "theme_color": "#1d2b1f"
+}
